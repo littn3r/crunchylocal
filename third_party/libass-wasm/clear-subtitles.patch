@@ -1,0 +1,25 @@
+--- a/src/subtitles-octopus.js
++++ b/src/subtitles-octopus.js
+@@ -1,3 +1,4 @@
++// Local modification (2026-10-13): accept equal-timestamp worker frames so subtitle clearing is not dropped.
+ "use strict";
+ var SubtitlesOctopus = function (options) {
+     var supportsWebAssembly = false;
+@@ -368,7 +369,7 @@
+                         break;
+                     }
+                     case 'renderCanvas': {
+-                        if (self.lastRenderTime < data.time) {
++                        if (self.lastRenderTime <= data.time) {
+                             self.lastRenderTime = data.time;
+                             self.renderFramesData = data;
+                             window.requestAnimationFrame(renderFrames);
+@@ -376,7 +377,7 @@
+                         break;
+                     }
+                     case 'renderFastCanvas': {
+-                        if (self.lastRenderTime < data.time) {
++                        if (self.lastRenderTime <= data.time) {
+                             self.lastRenderTime = data.time;
+                             self.renderFramesData = data;
+                             window.requestAnimationFrame(renderFastFrames);

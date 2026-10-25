@@ -1,0 +1,10 @@
+# Creates private configuration without installing Python on the host.
+services:
+  setup:
+    image: python:3.12-slim
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    working_dir: /project
+    volumes:
+      - .:/project
+    network_mode: none
+    entrypoint: ["python", "tools/init_config.py"]

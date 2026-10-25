@@ -1,0 +1,14 @@
+{
+  "one": {
+    "client_id": "",
+    "client_secret": ""
+  },
+  "rip": {
+    "client_id": "",
+    "client_secret": ""
+  },
+  "mal": {
+    "client_id": "",
+    "client_secret": ""
+  }
+}

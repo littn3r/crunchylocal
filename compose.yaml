@@ -1,0 +1,24 @@
+# Keep HTTP on localhost and use a reverse proxy for HTTPS access.
+services:
+  app:
+    build: .
+    stop_grace_period: 60s
+    shm_size: 256mb
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+      - /run:mode=0755,size=8m
+    environment:
+      CRUNCHY_LOCAL_PORT: "8765"
+      CRUNCHY_LOCAL_CATALOG_INTERVAL: ${CRUNCHY_LOCAL_CATALOG_INTERVAL:-86400}
+      CRUNCHY_LOCAL_PUBLIC_ORIGIN: ${CRUNCHY_LOCAL_PUBLIC_ORIGIN:-}
+      CRUNCHY_LOCAL_SESSION_KEY: ${CRUNCHY_LOCAL_SESSION_KEY:?Set Fernet key}
+    volumes:
+      - catalog-data:/var/lib/crunchy-local/catalog
+      - ./oauth_apps.json:/run/secrets/oauth_apps.json:ro
+    ports:
+      - 127.0.0.1:8765:8765
+    restart: unless-stopped
+
+volumes:
+  catalog-data:

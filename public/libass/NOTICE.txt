@@ -1,0 +1,10 @@
+Crunchy Local uses JavascriptSubtitlesOctopus / libass-wasm 4.1.0 for ASS subtitles.
+The renderer includes libass, FriBidi, FreeType, Fontconfig, HarfBuzz, Expat and Brotli.
+It uses the FreeType project for font rendering; FreeType is provided under the FreeType License (FTL).
+FriBidi is provided under LGPL-2.1-or-later. Full component notices and license texts are in COPYRIGHT.
+The fallback font is Liberation Sans 2.00.5 under SIL OFL 1.1; see OFL.txt.
+Emscripten and system-library notices are in EMSCRIPTEN-NOTICES.txt.
+The unmodified worker matches the libass-wasm 4.1.0 release; the JS wrapper's
+13 October 2026 subtitle-clearing modification is recorded in the supplied patch.
+Complete sources and rebuild materials are served at /source/ and described at /licenses.html.
+The application's MIT license does not replace these component licenses.

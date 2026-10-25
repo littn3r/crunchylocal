@@ -1,0 +1,68 @@
+{
+  "upstream_commit": "f5ead60c287fd6b84d4561a3b4fcc65dcd0d1f54",
+  "libraries": [
+    {
+      "name": "brotli",
+      "commit": "e61745a6b7add50d380cfd7d3883dd6c62fc2c71",
+      "url": "https://codeload.github.com/google/brotli/tar.gz/e61745a6b7add50d380cfd7d3883dd6c62fc2c71",
+      "archive_sha256": "280a7d0963ff6302f003c0bb4f414405924e1393ca70d5c61cc30d98ddaf2f49",
+      "bytes": 487278
+    },
+    {
+      "name": "expat",
+      "commit": "654d2de0da85662fcc7644a7acd7c2dd2cfb21f0",
+      "url": "https://codeload.github.com/libexpat/libexpat/tar.gz/654d2de0da85662fcc7644a7acd7c2dd2cfb21f0",
+      "archive_sha256": "81e02291cffb1cbba6669886b9943fa9c61bcdaac577017638737c19f35a0d0b",
+      "bytes": 8322150
+    },
+    {
+      "name": "fontconfig",
+      "commit": "c45e09df1ef235d653d56aef05012f6a3cc57979",
+      "url": "https://codeload.github.com/fontconfig/fontconfig/tar.gz/c45e09df1ef235d653d56aef05012f6a3cc57979",
+      "archive_sha256": "a7d682fe36183a70f222da0667d91f48c236d0dfae6f70ba22e519f8b31ca326",
+      "bytes": 557528
+    },
+    {
+      "name": "freetype",
+      "commit": "e8ebfe988b5f57bfb9a3ecb13c70d9791bce9ecf",
+      "url": "https://codeload.github.com/freetype/freetype/tar.gz/e8ebfe988b5f57bfb9a3ecb13c70d9791bce9ecf",
+      "archive_sha256": "1de6abbd7d2d0605cbf9eac8002ac481392e90cf1f491b6c16f56b88fa3bb58a",
+      "bytes": 2486005
+    },
+    {
+      "name": "fribidi",
+      "commit": "6428d8469e536bcbb6e12c7b79ba6659371c435a",
+      "url": "https://codeload.github.com/fribidi/fribidi/tar.gz/6428d8469e536bcbb6e12c7b79ba6659371c435a",
+      "archive_sha256": "7920b7d33f1e3945134745a8c665ca5bc748b9d907b3a03b1a6d481a77c0ae7f",
+      "bytes": 2110394
+    },
+    {
+      "name": "harfbuzz",
+      "commit": "970321db7bddbe8c579b73751fc655a924ea3ce6",
+      "url": "https://codeload.github.com/harfbuzz/harfbuzz/tar.gz/970321db7bddbe8c579b73751fc655a924ea3ce6",
+      "archive_sha256": "b2ae80dedff4fb9d3d24d41b1810ed372ce87a6a55d144b43765a37b80d9ef39",
+      "bytes": 35013210
+    },
+    {
+      "name": "libass",
+      "commit": "bef4b43ef1882b77f789f611d9cd24271ccdd65b",
+      "url": "https://codeload.github.com/libass/libass/tar.gz/bef4b43ef1882b77f789f611d9cd24271ccdd65b",
+      "archive_sha256": "f4fb6f20e644d0d26eac404d8baea5d2fdb9f0f74bae38d81a37e77a5616349e",
+      "bytes": 286216
+    },
+    {
+      "name": "freetype/subprojects/dlg",
+      "commit": "d142e646e263c89f93663e027c2f0d03739ab42d",
+      "url": "https://codeload.github.com/nyorain/dlg/tar.gz/d142e646e263c89f93663e027c2f0d03739ab42d",
+      "archive_sha256": "ec99c57984ebe8d1b3aa28d90c5758c7b83b63c04d0b0b10db7de207de06ef28",
+      "bytes": 836359
+    }
+  ],
+  "source_archive_sha256": "5c74600e4168b162deda9ec5205e022bb79ef3b37fe38849c899aa386121deed",
+  "emsdk_image": "emscripten/emsdk:3.1.15@sha256:0f219e5040df37d257b29c618d410eb502f7d0876025e7e10c4a25b018a6019d",
+  "binary_sha256": {
+    "subtitles-octopus-worker.wasm": "62892886b4a75dbc6a92e12fcd794c7ddaf95f395e09d4a75612c572612f42a9",
+    "subtitles-octopus-worker.js": "f95f2186c6ea37701cd2badb65568d3e501404deaab7e8460722435cd37f8d56",
+    "subtitles-octopus.js": "37dba5903214cb3706768947c3d84df95b57f114a7844351a1d078c3fe486067"
+  }
+}
