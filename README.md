@@ -116,7 +116,6 @@ This is an **unofficial, personal-use project**. It isn't affiliated with, endor
 
 ## Credits
 
-Huge thanks to the projects this one stands on:
 
 | Project | Used for |
 | --- | --- |
