@@ -310,6 +310,7 @@
   "Shikimori отклонил код входа. Проверьте Redirect URI в настройках OAuth-приложения.": "Shikimori rejected the sign-in code. Check the Redirect URI in your OAuth application settings.",
   "Shikimori перенаправил запрос на неподдерживаемый адрес.": "Shikimori redirected the request to an unsupported address.",
   "Shikimori сейчас недоступен. Повторите попытку позже.": "Shikimori is unavailable. Try again later.",
+  "Cloudflare блокирует запросы плеера к Shikimori. Попробуйте позже или используйте другую сеть для сервера плеера.": "Cloudflare is blocking the player's requests to Shikimori. Try again later or use another network for the player server.",
   "Shikimori: {0}, настройки": "Shikimori: {0}, settings",
   "Браузеру недоступен DRM. Если вы открыли плеер с другого ПК, подключитесь через SSH-туннель и откройте http://127.0.0.1:8765.": "DRM is unavailable in this browser. From another PC, connect through an SSH tunnel and open http://127.0.0.1:8765.",
   "Браузеру недоступен DRM. На Windows откройте плеер через SSH-туннель по адресу http://127.0.0.1:8765.": "DRM is unavailable in this browser. On Windows, open the player through an SSH tunnel at http://127.0.0.1:8765.",

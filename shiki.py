@@ -40,7 +40,6 @@ class ShikimoriBridge:
         self.rating_cache = SHIKI_SCORES
         self.mal_rating_cache = {}
         self.season_cache = {}
-        self.errors = {"one": "", "rip": ""}
 
     def _provider(self, provider):
         if provider not in HOSTS:
@@ -56,6 +55,8 @@ class ShikimoriBridge:
         kwargs.setdefault("impersonate", "chrome")
         for _ in range(3):
             response = requests.request(method, self._host(provider) + path, allow_redirects=False, **kwargs)
+            if response.headers.get("cf-mitigated") == "challenge":
+                raise RuntimeError("Cloudflare блокирует запросы плеера к Shikimori. Попробуйте позже или используйте другую сеть для сервера плеера.")
             if response.status_code not in (301, 302, 303, 307, 308):
                 return response
             target = urlsplit(urljoin(self._host(provider) + path, response.headers.get("Location", "")))
@@ -98,7 +99,7 @@ class ShikimoriBridge:
             return {provider: {"configured": bool(all(self._credentials(provider))),
                                "connected": bool(account.get("refresh_token") and account.get("user_id")),
                                "name": account.get("name", ""), "user_id": account.get("user_id"),
-                               "error": self.errors[provider], "host": self._host(provider)}
+                               "error": account.get("error", ""), "host": self._host(provider)}
                     for provider, account in self.accounts.items()}
 
     def configure(self, provider, client_id, client_secret):
@@ -112,7 +113,7 @@ class ShikimoriBridge:
                 account.pop(field, None)
             self.rate_cache.pop(provider, None)
             self.list_cache.pop(provider, None)
-            self.errors[provider] = ""
+            account.pop("error", None)
             self._save()
         return self.status()
 
@@ -124,6 +125,8 @@ class ShikimoriBridge:
         try:
             response = self._http(provider, method, path, headers=headers,
                                         json=data, timeout=25)
+        except RuntimeError:
+            raise
         except Exception:
             raise RuntimeError("Shikimori сейчас недоступен. Повторите попытку позже.") from None
         if response.status_code == 401 and auth:
@@ -152,6 +155,8 @@ class ShikimoriBridge:
             try:
                 response = self._http(provider, "POST", "/oauth/token",
                                          headers={"User-Agent": USER_AGENT}, data=payload, timeout=25)
+            except RuntimeError:
+                raise
             except Exception:
                 raise RuntimeError("Не удалось обновить вход в Shikimori.") from None
             if response.status_code != 200:
@@ -176,7 +181,7 @@ class ShikimoriBridge:
                 raise RuntimeError("OAuth-приложение для этого адреса Shikimori не настроено.")
             state = secrets.token_urlsafe(32)
             self.oauth_states[state] = (provider, redirect, time.time() + 600, owner_sid, self._host(provider))
-            self.errors[provider] = ""
+            account.pop("error", None)
             return self._host(provider) + "/oauth/authorize?" + urlencode({
                 "client_id": client_id, "redirect_uri": redirect,
                 "response_type": "code", "scope": "user_rates", "state": state})
@@ -191,7 +196,7 @@ class ShikimoriBridge:
         if len(pending) > 4 and provider == "rip":
             self.accounts[provider]["host"] = pending[4]
         if error or not code:
-            self.errors[provider] = "Доступ к списку не был разрешён."
+            self.accounts[provider]["error"] = "Доступ к списку не был разрешён."
             return provider
         with self.lock:
             account = self.accounts[provider]
@@ -213,13 +218,13 @@ class ShikimoriBridge:
             with self.lock:
                 account["user_id"] = int(user["id"])
                 account["name"] = user.get("nickname") or user.get("name") or "Shikimori"
-                self.errors[provider] = ""
+                account.pop("error", None)
                 self.rate_cache.pop(provider, None)
                 self.list_cache.pop(provider, None)
                 self._save()
         except Exception as exc:
             with self.lock:
-                self.errors[provider] = str(exc)
+                account["error"] = str(exc)
                 for field in ("access_token", "refresh_token", "expires_at", "user_id", "name"):
                     account.pop(field, None)
                 self._save()
