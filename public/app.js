@@ -12,7 +12,7 @@ const state = {
   provider: ['one','rip','mal'].includes(localStorage.getItem('shiki-provider')) ? localStorage.getItem('shiki-provider') : 'one',
   listFilter: '', shikiTarget: 0, forcedShikiId: 0, forcedShikiTitle: '', currentRate: null, watchedKey: '', shikiRenderSeq: 0,
   seasonMatch: null, seasonRatingId: 0,
-  crunchyRating: null,
+  crunchyRating: null, ratingsSeq: 0,
   relatedSeq: 0, controlsTimer: null, playbackErrorTimer: null, settingsSection: '', lastMediaTime: 0,
   playbackRecoveryAttempts: 0, recoveringPlayback: false, recoveryTime: 0,
   mini: false, sidebarCollapsed: false, audioLocale: '', audioSwitching: false,
@@ -48,7 +48,7 @@ function seasonLabel(season, index = 0) {
   return title;
 }
 function selectedShikiSeason() {
-  const id = state.shikiTarget || state.seasonRatingId || state.forcedShikiId || state.seasonMatch?.matched_id;
+  const id = state.shikiTarget || state.seasonRatingId || state.seasonMatch?.matched_id;
   return state.seasonMatch?.items.find((item) => item.mal_id === id) || null;
 }
 function currentSeasonTitle() {
@@ -62,8 +62,17 @@ function currentSeasonTitle() {
       && !matchedIsNumberedBase && matchedTitle.toLowerCase() !== (state.series?.title || '').toLowerCase()) return matchedTitle;
   return seasonLabel(season, state.seasons.indexOf(season));
 }
-function currentSeasonPoster() { return selectedShikiSeason()?.poster || state.series?.poster || state.series?.wide || ''; }
+function currentSeasonPoster() {
+  const info=state.seasonInfo;
+  if(info?.season===state.currentSeason && info.id===seasonInformationId() && info.data.poster)return info.data.poster;
+  const season=currentSeasonRecord();
+  return selectedShikiSeason()?.poster || season?.images?.poster_tall?.[0]?.at(-1)?.source || state.series?.poster || state.series?.wide || '';
+}
 function setPoster(image, source, fallback = '') {
+  if (/\/assets\/globals\/missing_/.test(source || '')) source = '';
+  if (/\/assets\/globals\/missing_/.test(fallback)) fallback = '';
+  source = source || fallback;
+  if (source && image.getAttribute('src') === source) return;
   image.dataset.fallback = fallback && fallback !== source ? fallback : '';
   image.style.opacity = '';
   image.src = source || fallback || '';
@@ -107,11 +116,13 @@ document.addEventListener('error', (event) => {
   if(image.classList.contains('character-image')) {
     image.outerHTML=`<span class="character-placeholder">${icon('person')}</span>`;return;
   }
-  const fallback = image.dataset.fallback || image.dataset.fallback2;
-  if (image.dataset.fallback) delete image.dataset.fallback;
-  else delete image.dataset.fallback2;
-  if (fallback && fallback !== image.src) image.src = fallback;
-  else image.style.opacity = '0';
+  for (const key of ['fallback','fallback2']) {
+    const fallback=image.dataset[key];delete image.dataset[key];
+    if(fallback && fallback!==image.src && !/\/assets\/globals\/missing_/.test(fallback)) {
+      image.style.opacity='';image.src=fallback;return;
+    }
+  }
+  image.style.opacity = '0';
 }, true);
 function icon(name) { return `<span class="mi" aria-hidden="true">${name}</span>`; }
 function formatTime(seconds) { if (!Number.isFinite(seconds)) return '0:00'; const s = Math.floor(seconds); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
@@ -176,9 +187,9 @@ function saveRoute() {
     params.set('series', state.series.id);
     if (state.currentSeason) params.set('season', state.currentSeason);
     if (state.episode?.id) params.set('episode', state.episode.id);
-    if (state.shikiTarget) params.set('shiki_id', String(state.shikiTarget));
-    else if (state.forcedShikiId) params.set('shiki_id', String(state.forcedShikiId));
-    if (state.forcedShikiTitle) params.set('shiki_title', state.forcedShikiTitle);
+    if (seasonInformationId()) params.set('shiki_id', String(seasonInformationId()));
+    const seasonTitle=currentSeasonRecord()?.title || state.forcedShikiTitle;
+    if (seasonTitle) params.set('shiki_title', seasonTitle);
   }
   const next = location.pathname + (params.size ? '?' + params : '');
   if (location.pathname + location.search !== next) history.replaceState(null, '', next);
@@ -357,16 +368,22 @@ async function loadFilters() {
     document.querySelectorAll('[data-age]').forEach((el) => el.addEventListener('click', () => setAge(el.dataset.age)));
   } catch { /* Search remains available if filter metadata is temporarily unavailable. */ }
 }
+function seasonTitleKey(title) {
+  let key=String(title || '').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  key=key.replace(/([a-z])([1-9]\d*)$/, '$1 $2').replace(/\b(\d+)(?:st|nd|rd|th) season\b/g,'season $1');
+  if(!/\b(?:season|part) \d+$/.test(key))key=key.replace(/\s+([2-9]\d*)$/, ' season $1');
+  return key.replace(/\s+season 1$/,'');
+}
 function preferredSeasonId(englishTitle, seasons, shikiId = 0, baseMalId = 0) {
-  const key = String(englishTitle || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const key = seasonTitleKey(englishTitle);
   if (!key) return shikiId && baseMalId && shikiId !== baseMalId ? null : seasons[0]?.id;
-  const exact = seasons.find((season) => String(season.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() === key);
-  if (exact) return exact.id;
+  const exact = seasons.filter((season) => seasonTitleKey(season.title) === key);
+  if (exact.length === 1) return exact[0].id;
   if (key.includes('final season')) return seasons.find((season) => /final\s+season/i.test(season.title || ''))?.id || null;
   if (/\b(?:oad|ova)\b/.test(key)) return seasons.find((season) => /\b(?:oad|ova)\b/i.test(season.title || ''))?.id || null;
   const number = key.match(/(?:season\s*(\d+)|(\d+)(?:st|nd|rd|th)\s*season|\s([2-9])$)/)?.slice(1).find(Boolean);
   if (number) return seasons.find((season) => Number(season.season_number) === Number(number))?.id || null;
-  if (shikiId && shikiId === baseMalId) return seasons.find((season) => Number(season.season_number) === 1)?.id || null;
+  if (shikiId) return null;
   return seasons[0]?.id;
 }
 async function openSeries(id, shikiId = 0, shikiTitle = '', restore = {}) {
@@ -377,6 +394,7 @@ async function openSeries(id, shikiId = 0, shikiTitle = '', restore = {}) {
   state.shikiTarget = 0; state.currentRate = null;
   state.forcedShikiId = shikiId; state.forcedShikiTitle = shikiTitle;
   state.seasonMatch = null; state.seasonRatingId = 0;
+  state.seasonInfo=null;++state.seasonInfoSeq;
   state.crunchyRating = null;
   $('shiki-controls').classList.add('hidden');
   $('shiki-target').innerHTML = I18n.html('<option value="">Выберите аниме для этого сезона</option>');
@@ -443,9 +461,10 @@ async function loadSeason(id) {
   state.seasonInfo=null;++state.seasonInfoSeq;
   state.episode = null;
   state.shikiTarget = 0;
-  saveRoute();
   state.episodes = [];
   state.seasonMatch = null; state.seasonRatingId = 0;
+  saveRoute();
+  refreshRatings();
   updateSeasonPresentation();
   $('player-cover').classList.remove('hidden');
   setPoster($('cover-image'), state.series?.wide || state.series?.poster || '', state.series?.poster || '');
@@ -487,13 +506,15 @@ async function resolveSeasonMatch(id) {
     if(state.provider !== provider)return;
     state.seasonMatch = result;
     const savedId = Number(localStorage.getItem(seasonMapKey(state.provider, state.series.id, id))) || 0;
-    const forcedId = result.items.some((item) => item.mal_id === state.forcedShikiId && item.score >= 100) ? state.forcedShikiId : 0;
-    const preferredId = savedId || forcedId || result.matched_id;
+    const validId = value => result.items.some((item) => item.mal_id === value && item.score >= 100);
+    const forcedId = validId(state.forcedShikiId) ? state.forcedShikiId : 0;
+    const preferredId = (validId(savedId) ? savedId : 0) || forcedId || result.matched_id;
     const preferred = result.items.find((item) => item.mal_id === preferredId);
     if (preferred?.poster) setPoster($('cover-image'), preferred.poster, state.series?.poster || state.series?.wide || '');
     state.seasonRatingId = preferredId || 0;
+    saveRoute();
     updateSeasonPresentation();
-    if (state.seasonRatingId) refreshRatings();
+    refreshRatings();
     if(state.view==='season')loadSeasonInformation();
   } catch { /* Manual Shikimori selection remains available. */ }
 }
@@ -525,15 +546,17 @@ function updateNextEpisode() {
   $('next-episode').title = available ? state.episodes[index + 1].title || I18n.t("Следующая серия") : I18n.t("Следующей серии нет");
 }
 async function refreshRatings() {
+  const seq = ++state.ratingsSeq;
   const s = state.series;
-  const malId = state.seasonRatingId || s?.mal_id;
+  const malId = seasonInformationId();
   $('community-ratings').innerHTML = `<a id="crunchy-rating" class="rating-link" href="${escapeHtml($('official-series-link').href)}" target="_blank" rel="noopener noreferrer">Crunchyroll <strong>${state.crunchyRating == null ? '—' : escapeHtml(state.crunchyRating.toFixed(1)) + ' / 5'}</strong></a><span id="other-ratings">${malId ? I18n.t("Загружаем оценки…") : I18n.t("Оценки MAL и Shikimori недоступны")}</span>`;
   if (!malId) return;
   try {
     const data = await api(`/api/ratings?mal_id=${malId}&provider=${state.provider}`);
-    if (state.series?.id !== s.id || (state.seasonRatingId || s.mal_id) !== malId) return;
-    $('other-ratings').outerHTML = `<a class="rating-link" href="${escapeHtml(data.mal_url)}" target="_blank" rel="noopener noreferrer" title="${data.mal_source === 'Shikimori' ? I18n.t("Оценка MAL через Shikimori") : I18n.t("Оценка MAL через Jikan")}">MAL <strong>${data.mal == null ? '—' : escapeHtml(data.mal.toFixed(2))}</strong></a><a class="rating-link" href="${escapeHtml(data.shikimori_url)}" target="_blank" rel="noopener noreferrer">Shikimori <strong>${data.shikimori == null ? '—' : escapeHtml(data.shikimori.toFixed(2))}</strong></a>`;
-  } catch { if ($('other-ratings')) $('other-ratings').textContent = I18n.t("Оценки MAL и Shikimori сейчас недоступны"); }
+    if (seq !== state.ratingsSeq || state.series?.id !== s.id || seasonInformationId() !== malId) return;
+    const malSource = data.mal_source === 'MyAnimeList' ? 'MyAnimeList' : data.mal_source === 'Shikimori' ? I18n.t("Оценка MAL через Shikimori") : I18n.t("Оценка MAL через Jikan");
+    $('other-ratings').outerHTML = `<a class="rating-link" href="${escapeHtml(data.mal_url)}" target="_blank" rel="noopener noreferrer" title="${malSource}">MAL <strong>${data.mal == null ? '—' : escapeHtml(data.mal.toFixed(2))}</strong></a><a class="rating-link" href="${escapeHtml(data.shikimori_url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(I18n.t('Средняя оценка пользователей Shikimori'))}">Shikimori <strong>${data.shikimori == null ? '—' : escapeHtml(data.shikimori.toFixed(2))}</strong></a>`;
+  } catch { if (seq === state.ratingsSeq && $('other-ratings')) $('other-ratings').textContent = I18n.t("Оценки MAL и Shikimori сейчас недоступны"); }
 }
 async function refreshCrunchyRating(id) {
   try {
@@ -559,8 +582,8 @@ function drainShikiScores() {
     const { card, provider, malId } = state.scoreQueue.shift();
     if (!card.isConnected) continue;
     state.scoreLoading++;
-    const key = `rip:${malId}`;
-    api(`/api/shiki/score?provider=rip&mal_id=${malId}`).then((result) => {
+    const key = `io-user-mean:${malId}`;
+    api(`/api/shiki/score?provider=one&mal_id=${malId}`).then((result) => {
       state.scoreCache.set(key, result.score);
       if (card.isConnected) card.querySelector('.list-shiki-score').textContent = result.score == null ? '—' : String(result.score);
     }).catch(() => {
@@ -578,7 +601,7 @@ function observeShikiScores(provider) {
       const card = entry.target;
       state.listScoreObserver.unobserve(card);
       const malId = Number(card.dataset.mal);
-      const key = `rip:${malId}`;
+      const key = `io-user-mean:${malId}`;
       if (state.scoreCache.has(key)) {
         const score = state.scoreCache.get(key);
         card.querySelector('.list-shiki-score').textContent = score == null ? '—' : String(score);
@@ -607,12 +630,12 @@ async function loadShikiList(force = false) {
       const progress = total ? Math.min(100, Math.round(current / total * 100)) : 0;
       const communityRating = provider === 'mal'
         ? `MAL: <span class="list-mal-score">${Number.isFinite(item.mal_score) ? escapeHtml(item.mal_score.toFixed(2)) : '—'}</span>`
-        : `${I18n.language === 'en' ? 'Shikimori' : 'Шики'}: <span class="list-shiki-score">…</span>`;
+        : `${I18n.language === 'en' ? 'Shikimori' : 'Шики'}: <span class="list-shiki-score" title="${escapeHtml(I18n.t('Средняя оценка пользователей Shikimori'))}">…</span>`;
       const content = I18n.html(`<span class="card-image">${item.poster ? `<img src="${escapeHtml(item.poster)}" data-fallback="${escapeHtml(item.poster_fallback || '')}" data-fallback2="${escapeHtml(item.catalog_poster || '')}" alt="" loading="lazy">` : ''}${item.crunchy_id ? '' : I18n.html('<span class="card-badge">Нет в каталоге</span>')}</span><span class="card-info"><strong>${escapeHtml(item.title)}</strong><span class="card-meta">${escapeHtml(statusLabel(item.rate.status))} · ${escapeHtml(current)}${total ? ` / ${escapeHtml(total)}` : ''} серий</span><span class="card-submeta">${escapeHtml(I18n.t('Моя оценка: {0}', item.rate.score || '—'))} · ${communityRating}</span><span class="progress"><span style="width:${progress}%"></span></span></span>`);
-      return item.crunchy_id ? `<button class="anime-card list-card" type="button" data-id="${escapeHtml(item.crunchy_id)}" data-mal="${item.mal_id}" data-english="${escapeHtml(item.english_title || '')}">${content}</button>` : `<a class="anime-card list-card unavailable" data-mal="${item.mal_id}" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${content}</a>`;
+      return item.crunchy_id ? `<button class="anime-card list-card" type="button" data-id="${escapeHtml(item.crunchy_id)}" data-season="${escapeHtml(item.season_id || '')}" data-mal="${item.mal_id}" data-english="${escapeHtml(item.english_title || '')}">${content}</button>` : `<a class="anime-card list-card unavailable" data-mal="${item.mal_id}" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${content}</a>`;
     }).join('');
     $('list-empty').classList.toggle('hidden', items.length > 0);
-    $('list-grid').querySelectorAll('button.list-card').forEach((card) => card.addEventListener('click', () => openSeries(card.dataset.id, Number(card.dataset.mal), card.dataset.english)));
+    $('list-grid').querySelectorAll('button.list-card').forEach((card) => card.addEventListener('click', () => openSeries(card.dataset.id, Number(card.dataset.mal), card.dataset.english, {seasonId:card.dataset.season})));
     observeShikiScores(provider);
     $('list-message').classList.add('hidden');
   } catch (error) { $('list-message').textContent = error.message; }
@@ -631,12 +654,10 @@ async function renderShikiControls() {
   catch (error) { shikiMessage(error.message, true); return; }
   if (renderSeq !== state.shikiRenderSeq || state.series?.id !== series.id || state.provider !== provider) return;
   const season = state.seasons.find((item) => item.id === state.currentSeason);
-  const seasonTitle = (season?.title || '').toLowerCase();
-  const firstSeason = season && (seasonTitle === series.title.toLowerCase() || /(?:season|сезон)\s*(?:1\b|one\b|i\b)/i.test(seasonTitle));
   const savedId = state.currentSeason ? Number(localStorage.getItem(seasonMapKey(provider, series.id, state.currentSeason))) || 0 : 0;
-  const forcedId = state.forcedShikiId && ((firstSeason && state.forcedShikiId === series.mal_id)
-    || state.seasonMatch?.items.some((item) => item.mal_id === state.forcedShikiId && item.score >= 100)) ? state.forcedShikiId : 0;
-  const defaultId = savedId || forcedId || state.seasonMatch?.matched_id || (firstSeason || !state.seasons.length ? series.mal_id : 0);
+  const validId = value => state.seasonMatch?.items.some((item) => item.mal_id === value && item.score >= 100);
+  const forcedId = validId(state.forcedShikiId) ? state.forcedShikiId : 0;
+  const defaultId = (validId(savedId) ? savedId : 0) || forcedId || state.seasonMatch?.matched_id || 0;
   let options = I18n.html('<option value="">Выберите аниме для этого сезона</option>');
   const added = new Set();
   for (const candidate of state.seasonMatch?.items || []) {
@@ -655,12 +676,12 @@ async function renderShikiControls() {
   syncSiteSelect('shiki-target');
   state.shikiTarget = Number($('shiki-target').value) || 0;
   state.forcedShikiId = 0;
-  saveRoute();
   if (!state.shikiTarget) shikiMessage(I18n.t("Не удалось однозначно сопоставить сезон. Найдите нужную запись в списке."));
   else shikiMessage(state.seasonMatch?.matched_id === state.shikiTarget ? I18n.t("Запись для текущего сезона найдена.") : '');
   state.seasonRatingId = state.shikiTarget || 0;
+  saveRoute();
   updateSeasonPresentation();
-  if (state.seasonRatingId) refreshRatings();
+  refreshRatings();
   await loadCurrentRate();
 }
 async function loadCurrentRate() {
@@ -1415,7 +1436,8 @@ function informationMarkup(data) {
   const link=(href,label)=>href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)} ${icon('open_in_new')}</a>` : escapeHtml(label);
   const facts=[['Студии',data.studios?.join(', ')],['Жанры',data.genres?.join(' · ')],['Дата выхода',data.aired],['Формат',data.kind],['Статус',data.status],['Длительность серии',typeof data.duration==='number' ? I18n.t("{0} мин.",data.duration) : data.duration]];
   const statuses={tv:'ТВ-сериал',movie:'Фильм',ova:'OVA',ona:'ONA',special:'Спецвыпуск',music:'Музыкальное видео',released:'Вышло',ongoing:'Выходит',anons:'Анонс',finished_airing:'Вышло',currently_airing:'Выходит',not_yet_aired:'Анонс', 'Finished Airing':'Вышло','Currently Airing':'Выходит','Not yet aired':'Анонс'};
-  const scoreLink=data.score==null ? '' : `<a class="rating-link" href="${escapeHtml(data.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(data.source)} <strong>${escapeHtml(data.score.toFixed(2))} / 10</strong></a>`;
+  const scoreTitle=data.source==='Shikimori' ? I18n.t('Средняя оценка пользователей Shikimori') : data.source;
+  const scoreLink=data.score==null ? '' : `<a class="rating-link" href="${escapeHtml(data.score_url || data.source_url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(scoreTitle)}">${escapeHtml(data.source)} <strong>${escapeHtml(data.score.toFixed(2))} / 10</strong></a>`;
   const malScore=data.source==='Shikimori' && data.mal_score!=null ? `<a class="rating-link" href="https://myanimelist.net/anime/${data.id}" target="_blank" rel="noopener noreferrer">MAL <strong>${escapeHtml(data.mal_score.toFixed(2))} / 10</strong></a>` : '';
   return `<section class="anime-facts"><h2>${escapeHtml(I18n.t("Информация"))}</h2><div class="anime-info-ratings">${scoreLink}${malScore}</div><dl>${facts.filter(([,value])=>value).map(([label,value])=>`<div><dt>${escapeHtml(I18n.t(label))}</dt><dd>${escapeHtml(I18n.t(statuses[value]||value))}</dd></div>`).join('')}</dl><p class="anime-info-source">${escapeHtml(I18n.t("Источник информации"))}: ${link(data.source_url,data.source)}</p></section><section class="anime-characters"><h2>${escapeHtml(I18n.t("Персонажи"))}</h2>${data.character_source==='Shikimori' ? `<p class="anime-info-source">${escapeHtml(I18n.t("Источник информации"))}: Shikimori</p>` : ''}${data.characters?.length ? `<div class="character-grid">${data.characters.map(c=>`<a class="character-card" href="${escapeHtml(c.url || data.source_url)}" target="_blank" rel="noopener noreferrer">${c.image ? `<img class="character-image" src="${escapeHtml(c.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="character-placeholder">${icon('person')}</span>`}<strong>${escapeHtml(c.name)}</strong><small>${escapeHtml(I18n.t(c.role==='Main'?'Главный герой':c.role==='Supporting'?'Второстепенный герой':c.role))}</small></a>`).join('')}</div>` : `<p class="anime-info-status">${escapeHtml(I18n.t(data.warnings?.includes('characters') ? "Персонажи временно недоступны." : "Информация о персонажах пока отсутствует."))}</p>`}</section>`;
 }

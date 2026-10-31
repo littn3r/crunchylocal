@@ -6,10 +6,13 @@ import re
 import secrets
 import threading
 import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urljoin
 
 from curl_cffi import requests
+from anime_metadata import mal_anime, mal_image, image_url, score as valid_score
 
 
 HOSTS = {"one": "https://shikimori.io", "rip": "https://shikimori.rip"}
@@ -21,15 +24,52 @@ ANIME_DETAILS = {}
 ANIME_DETAILS_LOCK = threading.RLock()
 RIP_POSTERS = {}
 RIP_POSTERS_LOCK = threading.RLock()
+PUBLIC_ANIME = {}
+PUBLIC_ANIME_LOCK = threading.RLock()
+CATALOG_SEASONS = {}
+CATALOG_SEASONS_LOCK = threading.RLock()
+ANIME_POSTERS = {}
+ANIME_POSTERS_LOCK = threading.RLock()
 
 STATUSES = {"planned", "watching", "rewatching", "completed", "on_hold", "dropped"}
 
 
+def community_score(stats):
+    """Arithmetic mean of IO user votes, as in the Shiki Rating userscript."""
+    if not isinstance(stats, list) or not stats:
+        return None
+    weighted = count = 0
+    seen = set()
+    for row in stats:
+        try:
+            value, votes = row["name"], row["value"]
+            if any(isinstance(v, bool) or not isinstance(v, (int, str)) for v in (value, votes)):
+                return None
+            value, votes = int(value), int(votes)
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not 1 <= value <= 10 or votes < 0 or value in seen:
+            return None
+        seen.add(value)
+        weighted += value * votes
+        count += votes
+    return round(weighted / count, 2) if count else None
+
+
 class ShikimoriBridge:
-    def __init__(self, root, catalog_by_mal, catalog=(), accounts=None, oauth_states=None, user_caches=None):
+    def __init__(self, root, catalog_by_mal, catalog=(), accounts=None, oauth_states=None, user_caches=None, season_loader=None):
         self.root = Path(root)
+        catalog=tuple(catalog)
         self.catalog_by_mal = catalog_by_mal
         self.catalog_by_title = {self._title_key(item["title"]): item for item in catalog}
+        self.catalog_by_id = {item['id']:item for item in (*catalog, *catalog_by_mal.values())}
+        self.catalog_groups=[]
+        for item in self.catalog_by_id.values():
+            title_key=self._title_key(item['title'])
+            anchor=re.sub(r'\s+(?:series|collection)$','',title_key)
+            if len(anchor.split())>=3 and (int(item.get('seasons') or 1)>1 or anchor!=title_key):
+                self.catalog_groups.append((anchor,item))
+        self.season_loader = season_loader
         apps_path = Path(os.environ.get("CRUNCHY_LOCAL_OAUTH_APPS_PATH") or self.root / "oauth_apps.json")
         self.oauth_apps = json.loads(apps_path.read_text(encoding="utf-8")) if apps_path.exists() else {}
         self.lock = threading.RLock()
@@ -68,12 +108,18 @@ class ShikimoriBridge:
 
     @staticmethod
     def _title_key(title):
-        return " ".join(re.findall(r"[a-z0-9]+", (title or "").casefold()))
+        title = unicodedata.normalize('NFKD', str(title or '')).casefold()
+        title = ''.join(c for c in title if not unicodedata.combining(c))
+        return " ".join(re.findall(r"[^\W_]+", title))
 
     @classmethod
     def _season_title_key(cls, title):
         key = cls._title_key(title)
-        return re.sub(r"(?<=[a-z])(?=[1-9][0-9]*$)", " ", key)
+        key = re.sub(r"(?<=[a-z])(?=[1-9][0-9]*$)", " ", key)
+        key = re.sub(r'\b(\d+)(?:st|nd|rd|th) season\b', r'season \1', key)
+        if not re.search(r'\b(?:season|part) \d+$', key):
+            key = re.sub(r'\s+([2-9]\d*)$', r' season \1', key)
+        return re.sub(r'\s+season 1$', '', key)
 
     def _credentials(self, provider):
         bundled = self.oauth_apps.get(provider) or {}
@@ -88,7 +134,74 @@ class ShikimoriBridge:
         base = re.sub(r"\s+\d+(?:st|nd|rd|th)\s+season(?:\s+part\s+\d+)?$", "", base)
         base = re.sub(r"\s+(?:the\s+)?final\s+season(?:\s+part\s+\d+)?$", "", base)
         base = re.sub(r"\s+(?:part\s+)?[2-9](?:\s+part\s+\d+)?$", "", base)
-        return self.catalog_by_title.get(base) if base != key else None
+        if base != key and base in self.catalog_by_title:
+            return self.catalog_by_title[base]
+        # A grouped Crunchyroll series may have differently named films/seasons.
+        grouped = []
+        for anchor,item in self.catalog_groups:
+            if key == anchor or key.startswith(anchor + ' '):grouped.append(item)
+        return grouped[0] if len(grouped) == 1 else None
+
+    def _catalog_seasons(self, local):
+        if not self.season_loader:return []
+        key=(local['id'],local.get('title'),local.get('mal_id'),local.get('seasons'))
+        with CATALOG_SEASONS_LOCK:
+            cached=CATALOG_SEASONS.get(key)
+            if cached and cached[0]>time.time():return cached[1]
+        try:
+            data=self.season_loader(local['id'])
+            seasons=data.get('data') or []
+            if not isinstance(seasons,list):return []
+            seasons=[s for s in seasons if s.get('id') and s.get('title')]
+        except Exception:return []
+        if seasons:
+            with CATALOG_SEASONS_LOCK:
+                if len(CATALOG_SEASONS)>=4000:CATALOG_SEASONS.pop(next(iter(CATALOG_SEASONS)))
+                CATALOG_SEASONS[key]=(time.time()+3600,seasons)
+        return seasons
+
+    def catalog_matches(self, animes):
+        """Match each external entry to an actual season, never to a franchise's latest ID."""
+        candidates={}
+        titles={}
+        for anime_id,anime in animes.items():
+            titles[anime_id]=[t for t in (anime.get('english'),anime.get('name'),*(anime.get('synonyms') or [])) if t]
+            local=self.catalog_by_mal.get(anime_id)
+            if local:candidates[local['id']]=local
+            for title in titles[anime_id]:
+                local=self._catalog_match(title)
+                if local:candidates[local['id']]=local
+        index={}
+        loaded={}
+        for local in candidates.values():
+            seasons=self._catalog_seasons(local) if int(local.get('seasons') or 1)>1 else []
+            loaded[local['id']]=seasons
+            for season in seasons:
+                title=season['title'];number=season.get('season_number') or season.get('season_sequence_number')
+                if re.fullmatch(r'(?:season|сезон)\s*\d+',title.strip(),re.I):title=local['title']+' '+title
+                aliases=[title]
+                if number and self._title_key(title)==self._title_key(local['title']):
+                    aliases=[local['title']+' Season '+str(number)]
+                for alias in aliases:
+                    index.setdefault(self._season_title_key(alias),{})[(local['id'],season['id'])]=(local,season)
+        result={}
+        for anime_id,anime in animes.items():
+            found={}
+            for title in titles[anime_id]:found.update(index.get(self._season_title_key(title),{}))
+            if len(found)==1:
+                local,season=next(iter(found.values()))
+                result[anime_id]={'crunchy_id':local['id'],'season_id':season['id'],'season_title':season['title']}
+                continue
+            # Without season metadata only a genuine single-season catalog entry is safe.
+            local=self.catalog_by_mal.get(anime_id)
+            if not local:
+                for title in titles[anime_id]:
+                    local=self._catalog_match(title)
+                    if local:break
+            same_entry=local and (anime_id==local.get('mal_id') or any(self._season_title_key(t)==self._season_title_key(local['title']) for t in titles[anime_id]))
+            if same_entry and not loaded.get(local['id']) and int(local.get('seasons') or 1)<=1:
+                result[anime_id]={'crunchy_id':local['id'],'season_id':None,'season_title':local['title']}
+        return result
 
     def _save(self):
         # The HTTP response writes the changed account into its browser's encrypted cookie.
@@ -262,30 +375,28 @@ class ShikimoriBridge:
         rates = self._rates(provider, force=force)
         ids = [int(rate["target_id"]) for rate in rates if rate.get("target_id")]
         details = self._anime_details(provider, ids)
-        posters = self._rip_posters(ids)
+        missing=[i for i in ids if not details.get(i)]
+        if missing:details.update({i:d for i,d in self._anime_details('one' if provider=='rip' else 'rip',missing).items() if d})
+        posters = self.anime_posters(ids)
+        matches = self.catalog_matches(details)
         items = []
         for rate in rates:
             mal_id = int(rate.get("target_id") or 0)
             remote = details.get(mal_id, {})
-            titles = [remote.get("english") or "", *(remote.get("synonyms") or [])]
-            local = self.catalog_by_mal.get(mal_id)
-            matched_title = remote.get("english") or ""
-            if not local:
-                for title in titles:
-                    local = self._catalog_match(title)
-                    if local:
-                        matched_title = title
-                        break
+            match=matches.get(mal_id,{})
+            local=self.catalog_by_id.get(match.get('crunchy_id'))
+            matched_title = match.get('season_title') or remote.get("english") or remote.get('name') or ""
             poster_data = posters.get(mal_id, {})
             poster = poster_data.get("originalUrl") or poster_data.get("mainUrl") or ""
             poster_fallback = poster_data.get("mainUrl") or ""
             items.append({"mal_id": mal_id, "crunchy_id": local["id"] if local else None,
+                          "season_id":match.get('season_id'),"season_title":match.get('season_title'),
                           "english_title": matched_title,
                           "title_en": remote.get("english") or remote.get("name") or (local or {}).get("title") or "Anime %s" % mal_id,
                           "title": remote.get("russian") or (local or {}).get("title") or remote.get("name") or "Аниме %s" % mal_id,
-                          "poster": poster or (local or {}).get("poster"),
+                          "poster": poster,
                           "poster_fallback": poster_fallback if poster_fallback != poster else "",
-                          "catalog_poster": (local or {}).get("poster") or "",
+                          "catalog_poster": poster_data.get('malUrl') or '',
                           "year": (local or {}).get("year"), "total_episodes": remote.get("episodes") or (local or {}).get("episodes"),
                           "mal_score": remote.get("score"), "rate": rate,
                           "url": (remote.get("url") if str(remote.get("url") or "").startswith("https://")
@@ -377,6 +488,46 @@ class ShikimoriBridge:
                         RIP_POSTERS.pop(value, None)
             return {value: dict(RIP_POSTERS.get(value, (0, {}))[1]) for value in ids}
 
+    def anime_posters(self, ids, mal_pictures=None):
+        """Season-specific public artwork: IO, RIP, then MAL, including unlisted anime."""
+        ids=list(dict.fromkeys(int(i) for i in ids if 0<int(i)<=9999999))
+        with ANIME_POSTERS_LOCK:
+            pending=[i for i in ids if ANIME_POSTERS.get(i,(0,{}))[0]<time.time()]
+        if pending:
+            details=self._anime_details('one',pending)
+            artwork={}
+            for i in pending:
+                poster=(details.get(i) or {}).get('poster') or {}
+                artwork[i]={k:image_url(poster.get(k),HOSTS['one']) for k in ('originalUrl','mainUrl')}
+            missing=[i for i in pending if not any(artwork[i].values())]
+            if missing:
+                for i,p in self._rip_posters(missing).items():
+                    for k in ('originalUrl','mainUrl'):
+                        source=image_url(p.get(k),HOSTS['rip'])
+                        if source:artwork[i][k]=source
+            missing=[]
+            for i in pending:
+                source=mal_image((mal_pictures or {}).get(i),'anime')
+                if source:artwork[i]['malUrl']=source
+                if not any(artwork[i].values()):missing.append(i)
+            def from_mal(i):
+                try:
+                    data,_=mal_anime(self,i)
+                    picture=data.get('main_picture') or {};jpg=((data.get('images') or {}).get('jpg') or {})
+                    return i,mal_image(picture.get('large') or picture.get('medium') or jpg.get('large_image_url') or jpg.get('image_url'),'anime')
+                except Exception:return i,''
+            if missing:
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    for i,source in pool.map(from_mal,missing):
+                        if source:artwork[i]['malUrl']=source
+            with ANIME_POSTERS_LOCK:
+                for i,p in artwork.items():
+                    if not p.get('originalUrl'):p['originalUrl']=p.get('mainUrl') or p.get('malUrl') or ''
+                    if len(ANIME_POSTERS)>=10000:ANIME_POSTERS.pop(next(iter(ANIME_POSTERS)))
+                    ANIME_POSTERS[i]=(time.time()+(86400 if p['originalUrl'] else 300),p)
+        with ANIME_POSTERS_LOCK:
+            return {i:dict(ANIME_POSTERS.get(i,(0,{}))[1]) for i in ids}
+
     def match_season(self, provider, title, episode_count=0, base_mal_id=0):
         provider = self._provider(provider)
         title = str(title or "").strip()[:180]
@@ -386,19 +537,16 @@ class ShikimoriBridge:
         cached = self.season_cache.get(cache_key)
         if cached and cached[0] > time.time():
             return cached[1]
+        # Matching is public and independent of the user's list/OAuth host.
+        provider='one'
         results = self._request(provider, "GET", "/api/animes?" + urlencode({"search": title, "limit": 15}))
         if not isinstance(results, list):
             raise RuntimeError("Shikimori вернул неожиданный ответ поиска.")
         ids = [int(item["id"]) for item in results if item.get("id")]
         english = {}
         if ids:
-            query = '{ animes(ids: "%s", limit: %s) { id english episodes } }' % (",".join(map(str, ids)), len(ids))
-            try:
-                data = self._request(provider, "POST", "/api/graphql", data={"query": query})
-                english = {int(item["id"]): item for item in data.get("data", {}).get("animes", [])}
-            except RuntimeError:
-                pass
-        posters = self._rip_posters(ids)
+            english=self._anime_details(provider,ids)
+        posters = self.anime_posters(ids)
         title_key = self._season_title_key(title)
         candidates = []
         for result in results:
@@ -409,7 +557,8 @@ class ShikimoriBridge:
             name = extra.get("english") or result.get("name") or ""
             anime_episodes = int(extra.get("episodes") or result.get("episodes") or 0)
             aired_episodes = int(result.get("episodes_aired") or 0)
-            exact = self._season_title_key(name) == title_key
+            aliases=[name,result.get('name'),extra.get('name'),*(extra.get('synonyms') or [])]
+            exact = any(t and self._season_title_key(t) == title_key for t in aliases)
             same_episodes = bool(episode_count and int(episode_count) in (anime_episodes, aired_episodes))
             score = (100 if exact else 0) + (20 if same_episodes else 0)
             if anime_id == int(base_mal_id or 0):
@@ -424,7 +573,8 @@ class ShikimoriBridge:
                                "url": self._host(provider) + "/animes/%s" % anime_id})
         candidates.sort(key=lambda item: item["score"], reverse=True)
         best = candidates[0] if candidates else None
-        matched_id = best["mal_id"] if best and best["score"] >= 120 else 0
+        exacts=[c for c in candidates if c['score']>=100]
+        matched_id = exacts[0]['mal_id'] if len(exacts)==1 else 0
         response = {"items": candidates[:12], "matched_id": matched_id}
         self.season_cache[cache_key] = (time.time() + 3600, response)
         return response
@@ -466,30 +616,48 @@ class ShikimoriBridge:
             self.list_cache.pop(provider, None)
         return result
 
+    def public_anime(self, mal_id, provider=None):
+        """Public Russian metadata can fall back to IO without forwarding OAuth."""
+        if not 0 < mal_id <= 9999999:
+            raise RuntimeError("Некорректный ID аниме.")
+        providers = (self._provider(provider),) if provider else ("rip", "one")
+        key = (provider, mal_id) if provider else mal_id
+        with PUBLIC_ANIME_LOCK:
+            cached = PUBLIC_ANIME.get(key)
+            if cached and cached[0] > time.time():
+                return cached[1], cached[2]
+        for index, provider in enumerate(providers):
+            try:
+                with PUBLIC_ANIME_LOCK:
+                    cached = PUBLIC_ANIME.get((provider, mal_id))
+                anime = cached[1] if cached and cached[0] > time.time() else self._request(provider, "GET", "/api/animes/%s" % mal_id)
+                if int(anime.get("id") or 0) != mal_id:
+                    raise ValueError("Anime ID mismatch")
+            except Exception:
+                if index == len(providers) - 1:
+                    raise
+                continue
+            with PUBLIC_ANIME_LOCK:
+                while len(PUBLIC_ANIME) >= 4000:
+                    PUBLIC_ANIME.pop(next(iter(PUBLIC_ANIME)))
+                entry = (time.time() + (3600 if len(providers) == 1 or provider == "rip" else 300), anime, provider)
+                PUBLIC_ANIME[key] = PUBLIC_ANIME[(provider, mal_id)] = entry
+            return anime, provider
+
     def shiki_score(self, provider, mal_id):
         self._provider(provider)
-        provider = "rip"
+        provider = "one"
         if mal_id <= 0 or mal_id > 9999999:
             raise RuntimeError("Некорректный ID аниме.")
-        key = (provider, mal_id)
+        key = ("io-user-mean", mal_id)
         with SHIKI_SCORES_LOCK:
             cached = self.rating_cache.get(key)
         if cached and cached[0] > time.time():
             return cached[1]["shikimori"]
         score = None
         try:
-            anime = self._request(provider, "GET", "/api/animes/%s" % mal_id)
-            anime_path = anime.get("url") or ""
-            if re.fullmatch(r"/animes/[A-Za-z0-9_-]+", anime_path):
-                page = self._http("rip", "GET", anime_path,
-                                  headers={"User-Agent": USER_AGENT}, timeout=15)
-                if page.status_code == 200:
-                    match = re.search(r'class="shiki-score"[^>]*>.*?<strong>\s*(\d{1,2}(?:\.\d{1,2})?)\s*</strong>',
-                                      page.text, re.DOTALL)
-                    if match:
-                        found = float(match.group(1))
-                        if 0 <= found <= 10:
-                            score = found
+            anime, _ = self.public_anime(mal_id, provider=provider)
+            score = community_score(anime.get("rates_scores_stats"))
         except Exception:
             pass
         with SHIKI_SCORES_LOCK:
@@ -499,7 +667,7 @@ class ShikimoriBridge:
 
     def ratings(self, provider, mal_id):
         self._provider(provider)
-        provider = "rip"
+        provider = "one"
         score = self.shiki_score(provider, mal_id)
         result = {"mal": None, "shikimori": score, "mal_id": mal_id,
                   "mal_source": None,
@@ -507,28 +675,23 @@ class ShikimoriBridge:
                   "mal_url": "https://myanimelist.net/anime/%s" % mal_id}
         mal_fallback = None
         try:
-            anime = self._request(provider, "GET", "/api/animes/%s" % mal_id)
+            anime, _ = self.public_anime(mal_id, provider=provider)
             anime_path = anime.get("url") or ""
             if re.fullmatch(r"/animes/[A-Za-z0-9_-]+", anime_path):
                 result["shikimori_url"] = self._host(provider) + anime_path
-            raw_score = anime.get("score")
-            if raw_score is not None and 0 <= float(raw_score) <= 10:
-                mal_fallback = float(raw_score)
+            mal_fallback = valid_score(anime.get("score"))
         except Exception:
             pass
         with self.lock:
             cached = self.mal_rating_cache.get(mal_id)
-        if cached and cached[0] > time.time():
+        if cached and cached[0] > time.time() and cached[1] is not None:
             result["mal"], result["mal_source"] = cached[1:]
             return result
         try:
-            response = requests.get("https://api.jikan.moe/v4/anime/%s" % mal_id,
-                                    headers={"User-Agent": USER_AGENT}, timeout=12)
-            if response.status_code == 200:
-                anime = response.json().get("data") or {}
-                if anime.get("score") is not None and 0 <= float(anime["score"]) <= 10:
-                    result["mal"] = float(anime["score"])
-                    result["mal_source"] = "Jikan"
+            anime, source = mal_anime(self, mal_id)
+            result["mal"] = valid_score(anime.get("score"))
+            if result["mal"] is not None:
+                result["mal_source"] = source
         except Exception:
             pass
         if result["mal"] is None and mal_fallback is not None:

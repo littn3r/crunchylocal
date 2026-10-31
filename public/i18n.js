@@ -185,6 +185,7 @@
   "Официальная страница входа откроется здесь через браузер сервера. Нажмите нужное поле на экране и вводите текст. Кнопка «Клавиатура» открывает клавиатуру повторно. Данные ввода проходят через ваш сервер и не сохраняются.": "Official sign-in opens here through the server browser. Tap a field to type. Use “Keyboard” to reopen it. Your input passes through your server and is not saved.",
   "Оценка MAL через Jikan": "MAL rating via Jikan",
   "Оценка MAL через Shikimori": "MAL rating via Shikimori",
+  "Средняя оценка пользователей Shikimori": "Average Shikimori user rating",
   "Оценки MAL и Shikimori недоступны": "MAL and Shikimori ratings are unavailable",
   "Оценки MAL и Shikimori сейчас недоступны": "MAL and Shikimori ratings are currently unavailable",
   "Очень низко": "Very low",

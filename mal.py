@@ -128,13 +128,18 @@ class MALBridge:
                     url=urlsplit(next_url)
                     if url.scheme!='https' or url.netloc!='api.myanimelist.net' or url.path!='/v2/users/@me/animelist':raise RuntimeError('MAL вернул некорректную пагинацию списка.')
                     path='/users/@me/animelist?'+url.query
-            posters=self.shiki._rip_posters([int(row['node']['id']) for row in rows])
+            nodes={int(row['node']['id']):row['node'] for row in rows}
+            posters=self.shiki.anime_posters(list(nodes),{i:(a.get('main_picture') or {}).get('large') or (a.get('main_picture') or {}).get('medium') for i,a in nodes.items()})
+            metadata=self.shiki._anime_details('one',list(nodes))
+            matches=self.shiki.catalog_matches({i:{'id':i,'name':a.get('title'),'english':(a.get('alternative_titles') or {}).get('en') or (metadata.get(i) or {}).get('english'),
+                'synonyms':[*((a.get('alternative_titles') or {}).get('synonyms') or []),
+                            (metadata.get(i) or {}).get('english'),(metadata.get(i) or {}).get('name'),*((metadata.get(i) or {}).get('synonyms') or [])]} for i,a in nodes.items()})
             items=[]
             for row in rows:
-                anime=row['node'];anime_id=int(anime['id']);title=anime.get('alternative_titles',{}).get('en') or anime['title']
-                local=self.shiki.catalog_by_mal.get(anime_id) or self.shiki._catalog_match(title) or self.shiki._catalog_match(anime['title'])
+                anime=row['node'];anime_id=int(anime['id']);title=anime.get('alternative_titles',{}).get('en') or (metadata.get(anime_id) or {}).get('english') or anime['title']
+                match=matches.get(anime_id,{})
                 artwork=posters.get(anime_id,{})
-                items.append({'mal_id':anime_id,'crunchy_id':local['id'] if local else None,'title':title,'title_en':title,'english_title':title,'total_episodes':anime.get('num_episodes') or 0,'rate':self.normalize(row.get('list_status',{})),'mal_score':anime.get('mean'),'poster':artwork.get('originalUrl') or artwork.get('mainUrl') or (local or {}).get('poster',''),'poster_fallback':artwork.get('mainUrl',''),'catalog_poster':(local or {}).get('poster',''),'url':'https://myanimelist.net/anime/%s'%anime_id})
+                items.append({'mal_id':anime_id,'crunchy_id':match.get('crunchy_id'),'season_id':match.get('season_id'),'season_title':match.get('season_title'),'title':title,'title_en':title,'english_title':match.get('season_title') or title,'total_episodes':anime.get('num_episodes') or 0,'rate':self.normalize(row.get('list_status',{})),'mal_score':anime.get('mean'),'poster':artwork.get('originalUrl') or artwork.get('mainUrl') or artwork.get('malUrl') or (anime.get('main_picture') or {}).get('large') or (anime.get('main_picture') or {}).get('medium') or '', 'poster_fallback':artwork.get('mainUrl',''),'catalog_poster':artwork.get('malUrl') or (anime.get('main_picture') or {}).get('large') or (anime.get('main_picture') or {}).get('medium') or '', 'url':'https://myanimelist.net/anime/%s'%anime_id})
             result={'items':items,'total':len(items),'available':sum(bool(x['crunchy_id']) for x in items)}
             self.cache['mal_list']=(time.time()+300,result,self.catalog_version)
             return result

@@ -452,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             self.initial_stream = (State.stream_id, State.stream_token)
         self.shiki = ShikimoriBridge(ROOT, self.catalog.by_mal_id, self.catalog.items,
                                      accounts=self.original_accounts, oauth_states=OAUTH_STATES,
-                                     user_caches=caches)
+                                     user_caches=caches,season_loader=lambda series_id: cms('series/%s/seasons' % series_id))
         self.mal = MALBridge(ROOT, self.shiki, self.original_mal, MAL_OAUTH_STATES, caches)
         self.context_ready = True
 
@@ -712,7 +712,7 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response(self.mal.list(force) if provider == "mal" else self.shiki.list(provider, force=force))
         elif path == "/api/shiki/season":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            self.json_response(self.shiki.match_season("rip" if (query.get("provider") or ["one"])[0] == "mal" else (query.get("provider") or ["one"])[0],
+            self.json_response(self.shiki.match_season("one" if (query.get("provider") or ["one"])[0] == "mal" else (query.get("provider") or ["one"])[0],
                                                   (query.get("title") or [""])[0],
                                                   int((query.get("episodes") or ["0"])[0]),
                                                   int((query.get("mal_id") or ["0"])[0])))
