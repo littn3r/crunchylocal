@@ -1,4 +1,4 @@
-// Chromium runs as a hidden local helper. The Crunchyroll page has no Node access.
+// Chromium background helper process. Target web pages run without Node.js integration.
 const { app, BrowserWindow, session } = require('electron');
 const readline = require('readline');
 const crypto = require('crypto');
@@ -49,7 +49,7 @@ async function handle(job) {
   ]); } finally { clearTimeout(timer); }
 }
 
-// User-controlled official sign-in, streamed to their browser. Nothing is saved to disk.
+// Interactive authentication session streamed to the client without persisting credentials to disk.
 const logins = new Map();
 function trustedLoginURL(url) {
   try { const u = new URL(url); return u.protocol === 'https:' && (u.hostname === 'crunchyroll.com' || u.hostname.endsWith('.crunchyroll.com')); }

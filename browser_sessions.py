@@ -1,4 +1,4 @@
-"""Encrypted, browser-owned account cookies. No user tokens are written to disk."""
+"""Encrypted client-side session management. Authentication tokens are not persisted to disk."""
 
 import json
 import os

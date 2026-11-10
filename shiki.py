@@ -1,4 +1,4 @@
-"""Shikimori OAuth, lists and ratings for the local player."""
+"""Shikimori OAuth, user lists, and community ratings for Crunchy Local."""
 
 import json
 import os
@@ -17,7 +17,7 @@ from anime_metadata import mal_anime, mal_image, image_url, score as valid_score
 
 HOSTS = {"one": "https://shikimori.io", "rip": "https://shikimori.rip"}
 RIP_HOSTS = ("https://shikimori.rip", "https://shikirip.top", "https://shikimori.net")
-USER_AGENT = "Crunchy Local (personal local player)"
+USER_AGENT = "Crunchy Local (self-hosted web player)"
 SHIKI_SCORES = {}
 SHIKI_SCORES_LOCK = threading.RLock()
 ANIME_DETAILS = {}
@@ -35,7 +35,7 @@ STATUSES = {"planned", "watching", "rewatching", "completed", "on_hold", "droppe
 
 
 def community_score(stats):
-    """Arithmetic mean of IO user votes, as in the Shiki Rating userscript."""
+    """Calculate the arithmetic mean of user votes."""
     if not isinstance(stats, list) or not stats:
         return None
     weighted = count = 0

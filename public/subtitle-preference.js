@@ -1,4 +1,4 @@
-/* Store subtitle language rather than episode-specific track IDs. */
+/* Persist subtitle language preference across episodes rather than episode-specific track IDs. */
 (() => {
   const key = 'crunchy-subtitle-language';
   function normalize(value) {

@@ -1,4 +1,4 @@
-"""Official MyAnimeList API; account tokens live in encrypted browser cookies."""
+"""Official MyAnimeList API integration with encrypted client session storage."""
 import json
 import os
 import secrets

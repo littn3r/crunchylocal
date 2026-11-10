@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Crunchyroll catalog and browser-DRM playback bridge for this Mac and its LAN."""
+"""Crunchyroll catalog and browser-DRM playback bridge for local network and remote streaming."""
 
 import base64
 import html

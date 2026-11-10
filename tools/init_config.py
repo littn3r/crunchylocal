@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create local configuration without displaying secrets or replacing existing files."""
+"""Generate initial configuration files without exposing secrets or overwriting existing files."""
 import json
 import base64
 import os

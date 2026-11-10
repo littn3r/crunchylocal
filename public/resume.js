@@ -1,4 +1,4 @@
-/* No account data: this browser remembers only the last selected episode. */
+/* Client-side playback state: stores the last selected episode in browser storage. */
 (function (root) {
   const KEY = 'crunchy-last-episode';
   const id = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{4,40}$/.test(value);

@@ -1,4 +1,4 @@
-/* Crunchyroll FairPlay uses the legacy Apple CDM and the complete SKD query. */
+/* FairPlay DRM integration using Apple EME legacy CDM and SKD queries. */
 (() => {
   let installed = false;
   function qualities(manifest) {

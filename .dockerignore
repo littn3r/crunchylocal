@@ -55,6 +55,3 @@ backups/
 *.swp
 .idea/
 .vscode/
-# Local launch helpers contain machine-specific connection details
-/Открыть с Windows.cmd
-/public/Start-on-Windows.cmd

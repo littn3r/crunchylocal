@@ -1,4 +1,4 @@
-"""Validate, cache and publish public catalog snapshots without blocking playback."""
+"""Validate, cache, and publish public catalog snapshots without blocking active playback."""
 import hashlib
 import json
 import math

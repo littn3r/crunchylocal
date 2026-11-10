@@ -1,5 +1,5 @@
 I18n.apply(document);
-/* Local themed select menus. The native select remains the source of truth. */
+/* Themed custom select menus synchronized with underlying native select elements. */
 (() => {
   let opened = null;
   const controls = new Map();
